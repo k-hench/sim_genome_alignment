@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+rm -r results/
+rm -r logs/
+rm -r data/genomes/
+#rm img/*

@@ -1,0 +1,13 @@
+idx: 
+ - 1
+ - 2
+ - 3
+
+ref: genome_1
+
+queries:
+  - genome_2
+  - genome_3
+
+# lastParams: "-m 1 -j 3 -u 1 -p HOXD70"
+lastParams: "-j 3"

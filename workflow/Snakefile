@@ -1,0 +1,115 @@
+'''
+snakemake --use-conda --cores 1 --configfile config/sm_config.yaml
+'''
+rule all:
+    input:
+        "img/alignment.svg",
+        "img/lastz_alignments.svg"
+
+rule create_genomes:
+    output:
+      genomes = expand("data/genomes/genome_{idx}.fa", idx = config[ "idx" ]),
+      bed_files = expand("results/bed/inversions_{idx}.bed", idx = config[ "idx" ])
+    log:
+      "logs/create_genomes.log"
+    shell: "Rscript R/create_base_genomes.R 2> {log} 1> {log}"
+
+rule lastdb_index:
+    input:
+      fasta = 'data/genomes/{ref}.fa'
+    output:
+      temp('results/genome/{ref}lastdb_index.done')
+    params:
+      indexBase = 'data/genomes/{ref}',
+      refSizeFile = 'results/genome/{ref}.size',
+    log:
+      'logs/{ref}_lastdbIndex.log'
+    conda:
+      'msa_align'
+    shell:
+      """
+      faSize -detailed {input.fasta} > {params.refSizeFile} 2>{log} && lastdb -R 10 -u YASS -c {params.indexBase} {input.fasta} 2>{log} && touch {output} 2>{log}
+      """
+
+rule build_index:
+    input:
+      str(rules.lastdb_index.output).format( ref = config[ 'ref' ] ),
+      fastaFile="data/genomes/{species}.fa"
+    output:
+      "results/genome/{species}.size"
+    params:
+      indexBase='data/genomes/{ref}'.format( ref = config[ "ref" ]),
+      speciesSizeFile='results/genome/{species}.size',
+      refNibDir='results/genome/nib',
+      refFastaFile="data/genomes/{ref}.fa".format( ref = config[ "ref" ]),
+      refNib2Bit='results/genome/nib/{ref}.2bit'.format( ref = config[ 'ref' ]),
+    log:
+      'logs/{species}_index.log'
+    conda:
+      'msa_ucsc'
+    threads: 1
+    shell:
+      """
+      mkdir -p {params.refNibDir} && \
+      faToTwoBit {params.refFastaFile} {params.refNib2Bit} && \
+      faSize -detailed {input.fastaFile} > {output}
+      """
+
+rule align_single_last:
+    input:
+      str(rules.lastdb_index.output).format( ref = config[ 'ref' ] ),
+      fastaFile = "data/genomes/{species}.fa",
+      speciesSizeFile = 'results/genome/{species}.size',
+    output:
+      maf = 'results/maf/{species}.maf',
+      psl = 'results/psl/{species}.psl'
+    params:
+      indexBase = 'data/genomes/{ref}'.format( ref = config[ 'ref' ] ),
+      lastParams = config[ 'lastParams' ]
+    log:
+      'logs/{species}_align.log'
+    conda:
+      'msa_align'
+    threads: 1
+    shell:
+      """
+      lastal {params.lastParams} {params.indexBase} {input.fastaFile} 2>{log} 1>{output.maf}
+      maf-convert psl {output.maf} 2>{log} 1>{output.psl}
+      """
+
+rule plot_alignments:
+    input:
+      expand( 'results/psl/{species}.psl', species = config[ "queries" ] )
+    output:
+      "img/alignment.svg"
+    log:
+      'logs/alignment_plot.log'
+    shell: "Rscript R/plot_alignments.R  2> {log} 1> {log}"
+
+rule lastz_align:
+    input:
+      refFile = "data/genomes/{ref}.fa".format( ref = config[ 'ref' ] ),
+      fastaFile = "data/genomes/{species}.fa"
+    output:
+      maf = "results/lastz/{species}.maf",
+      dplot = "results/lastz/dplot/{species}.tsv"
+    log:
+      'logs/lastz_{species}.log'
+    shell:
+      """
+      lastz {input.refFile}[multiple] \
+          {input.fastaFile}[multiple] \
+        --notransition --step=20 --nogapped \
+        --rdotplot={output.dplot} \
+        --format=maf 2>{log} 1>{output.maf}
+      """
+
+rule plot_lastz_alignments:
+    input:
+      lastz_alignments = expand( 'results/lastz/dplot/{species}.tsv', species = config[ "queries" ] ),
+      genome_sizes = expand( 'results/genome/genome_{x}.size', x = [ 1, 2, 3] )
+    output:
+      "img/lastz_alignments.svg"
+    log:
+      'logs/lastz_plot.log'
+    shell: "Rscript R/plot_lastz.R  2> {log} 1> {log}"
